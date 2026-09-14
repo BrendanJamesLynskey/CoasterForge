@@ -78,16 +78,17 @@
       <legend>Layout</legend>
       <label>Coaster type</label>
       <select id="coasterType">
+        <option value="custom" selected>Custom — build your own</option>
         <option value="wildmouse">Wild Mouse — tight switchbacks</option>
-        <option value="outback" selected>Out &amp; Back — classic lift + airtime hills</option>
+        <option value="outback">Out &amp; Back — classic lift + airtime hills</option>
         <option value="looping">Looper — vertical loop + corkscrew</option>
+        <option value="invertedlooper">Inverted Looper — B&amp;M-style, hangs &amp; inverts</option>
         <option value="family">Family Coaster — gentle wide sweeps</option>
-        <option value="custom">Custom — build your own</option>
       </select>
       <button id="regenBtn">Regenerate Track</button>
     </fieldset>
 
-    <fieldset id="builderPanel" style="display:none">
+    <fieldset id="builderPanel">
       <legend>Track Builder</legend>
       <div class="row">
         <button id="startBlankBtn" class="secondary">Start Blank</button>
@@ -98,6 +99,7 @@
           <option value="wildmouse">Wild Mouse</option>
           <option value="outback" selected>Out &amp; Back</option>
           <option value="looping">Looper</option>
+          <option value="invertedlooper">Inverted Looper</option>
           <option value="family">Family Coaster</option>
         </select>
         <button id="loadPresetBtn" class="secondary" style="width:auto;padding:6px 14px;">Load</button>
@@ -106,13 +108,14 @@
       <label>Segments (chained end-to-end)</label>
       <div id="segList"><div class="segempty">Empty — add your first segment below.</div></div>
 
-      <label>Add segment</label>
+      <label>Add segment <span style="color:var(--good);font-weight:normal;">— previewed live in the scene</span></label>
       <select id="addSegType">
         <option value="straight">Straight</option>
         <option value="climb">Climb / Drop</option>
         <option value="hill">Airtime Hill</option>
-        <option value="levelbank">Level Bank (return to 0°)</option>
+        <option value="bankchange">Bank Change (roll to any angle)</option>
         <option value="curve">Banked Curve</option>
+        <option value="roll">Barrel Roll (full inversion)</option>
         <option value="lift">Lift Hill</option>
         <option value="brake">Brake Run</option>
         <option value="loop">Vertical Loop</option>
@@ -141,8 +144,12 @@
         <input type="range" id="segAngle" min="10" max="180" step="5" value="90">
       </div>
       <div class="segfield" id="segFieldBank">
-        <label>Bank (&deg;) <span class="rangeval" id="segBankLbl">20</span></label>
-        <input type="range" id="segBank" min="0" max="60" step="1" value="20">
+        <label>Bank (&deg;, 180 = fully inverted) <span class="rangeval" id="segBankLbl">20</span></label>
+        <input type="range" id="segBank" min="0" max="180" step="1" value="20">
+      </div>
+      <div class="segfield" id="segFieldBankTarget">
+        <label>Roll to (&deg;, 0 = level, 180 = inverted) <span class="rangeval" id="segBankTargetLbl">0</span></label>
+        <input type="range" id="segBankTarget" min="-180" max="180" step="1" value="0">
       </div>
       <div class="segfield" id="segFieldTurns">
         <label>Turns <span class="rangeval" id="segTurnsLbl">1.00</span></label>
@@ -153,8 +160,8 @@
         <select id="segDir"><option value="right">Right</option><option value="left">Left</option></select>
       </div>
 
-      <button id="addSegBtn">Add Segment</button>
-      <p class="note">Every segment continues from exactly where the last one finished — pitch, heading and bank all carry over, so the ride is always physically continuous, however you build it.</p>
+      <button id="addSegBtn">Place Segment</button>
+      <p class="note">The green ghost piece in the scene shows exactly where this segment will sit — adjust the sliders to line it up, then place it. Every segment continues from wherever the last one finished, so the ride is always physically continuous.</p>
     </fieldset>
 
     <fieldset>
@@ -181,6 +188,11 @@
 
     <fieldset>
       <legend>Track geometry</legend>
+      <label>Track style</label>
+      <select id="trackStyle">
+        <option value="sitdown" selected>Sit-Down — twin round rail</option>
+        <option value="inverted">Inverted — B&amp;M box-beam, train hangs below</option>
+      </select>
       <label>Rail diameter (mm) <span class="rangeval" id="railDLbl">3.0</span></label>
       <input type="range" id="railD" min="1.5" max="6" step="0.1" value="3.0">
       <label>Rail gauge (mm) <span class="rangeval" id="gaugeLbl">11</span></label>
@@ -193,8 +205,8 @@
       <legend>Ride physics</legend>
       <label>Train mass (kg) <span class="rangeval" id="massLbl">1600</span></label>
       <input type="range" id="mass" min="500" max="4000" step="50" value="1600">
-      <label>Rolling friction <span class="rangeval" id="fricLbl">0.020</span></label>
-      <input type="range" id="fric" min="0.005" max="0.06" step="0.001" value="0.020">
+      <label>Rolling friction <span class="rangeval" id="fricLbl">0.024</span></label>
+      <input type="range" id="fric" min="0.005" max="0.06" step="0.001" value="0.024">
       <label>Lift chain speed (m/s) <span class="rangeval" id="liftSLbl">2.2</span></label>
       <input type="range" id="liftS" min="0.8" max="4" step="0.1" value="2.2">
       <label>Brake exit speed (m/s) <span class="rangeval" id="brakeSLbl">2.5</span></label>
@@ -224,7 +236,7 @@
       <legend>Export for printing</legend>
       <button id="exportFullBtn" class="secondary">Export Full Model (.stl)</button>
       <button id="exportKitBtn">Export Print Kit (.zip)</button>
-      <p class="note">The kit cuts every rail run and tall support into bed-sized pieces, each with a matching sleeve connector for glue-up, plus an assembly manifest.</p>
+      <p class="note">The kit cuts every rail run and tall support into bed-sized pieces, each with a matching sleeve connector for glue-up, plus an assembly manifest. Lift hill pieces are left open between ties so you can thread a real fine chain through before final assembly.</p>
     </fieldset>
   </div>
 
