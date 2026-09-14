@@ -52,6 +52,20 @@
   #toast.show{opacity:1;}
   a{color:var(--accent2);}
   .note{font-size:10.5px;color:#5a6070;line-height:1.5;margin-top:6px;}
+  #segList{max-height:200px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;background:#0d0f15;margin-top:8px;}
+  #segList::-webkit-scrollbar{width:6px;}
+  #segList::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px;}
+  .segempty{padding:16px 10px;text-align:center;color:#5a6070;font-size:11px;font-family:var(--mono);}
+  .segrow{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:6px 8px;
+    border-bottom:1px solid var(--line);font-size:11px;font-family:var(--mono);color:var(--text);}
+  .segrow:last-child{border-bottom:none;}
+  .segrow .segn{color:#5a6070;margin-right:4px;}
+  .segactions{display:flex;gap:3px;flex-shrink:0;}
+  .segactions button{width:auto;padding:1px 6px;margin:0;font-size:11px;font-weight:400;
+    background:#1c2029;color:var(--dim);border:1px solid var(--line);border-radius:4px;}
+  .segactions button:disabled{opacity:.25;}
+  .segfield{display:none;}
+  #builderPanel .row select{flex:1;}
 </style>
 </head>
 <body>
@@ -68,8 +82,79 @@
         <option value="outback" selected>Out &amp; Back — classic lift + airtime hills</option>
         <option value="looping">Looper — vertical loop + corkscrew</option>
         <option value="family">Family Coaster — gentle wide sweeps</option>
+        <option value="custom">Custom — build your own</option>
       </select>
       <button id="regenBtn">Regenerate Track</button>
+    </fieldset>
+
+    <fieldset id="builderPanel" style="display:none">
+      <legend>Track Builder</legend>
+      <div class="row">
+        <button id="startBlankBtn" class="secondary">Start Blank</button>
+      </div>
+      <label>…or load a preset to edit</label>
+      <div class="row">
+        <select id="loadPresetSelect">
+          <option value="wildmouse">Wild Mouse</option>
+          <option value="outback" selected>Out &amp; Back</option>
+          <option value="looping">Looper</option>
+          <option value="family">Family Coaster</option>
+        </select>
+        <button id="loadPresetBtn" class="secondary" style="width:auto;padding:6px 14px;">Load</button>
+      </div>
+
+      <label>Segments (chained end-to-end)</label>
+      <div id="segList"><div class="segempty">Empty — add your first segment below.</div></div>
+
+      <label>Add segment</label>
+      <select id="addSegType">
+        <option value="straight">Straight</option>
+        <option value="climb">Climb / Drop</option>
+        <option value="hill">Airtime Hill</option>
+        <option value="levelbank">Level Bank (return to 0°)</option>
+        <option value="curve">Banked Curve</option>
+        <option value="lift">Lift Hill</option>
+        <option value="brake">Brake Run</option>
+        <option value="loop">Vertical Loop</option>
+        <option value="corkscrew">Corkscrew</option>
+        <option value="station">Station</option>
+      </select>
+
+      <div class="segfield" id="segFieldLength">
+        <label>Length (m) <span class="rangeval" id="segLengthLbl">10</span></label>
+        <input type="range" id="segLength" min="2" max="50" step="0.5" value="10">
+      </div>
+      <div class="segfield" id="segFieldGrade">
+        <label>Target pitch (&deg;) <span class="rangeval" id="segGradeLbl">0</span></label>
+        <input type="range" id="segGrade" min="-70" max="70" step="1" value="0">
+      </div>
+      <div class="segfield" id="segFieldPeak">
+        <label>Peak angle (&deg;) <span class="rangeval" id="segPeakLbl">20</span></label>
+        <input type="range" id="segPeak" min="-40" max="40" step="1" value="20">
+      </div>
+      <div class="segfield" id="segFieldRadius">
+        <label>Radius (m) <span class="rangeval" id="segRadiusLbl">8</span></label>
+        <input type="range" id="segRadius" min="1.5" max="30" step="0.5" value="8">
+      </div>
+      <div class="segfield" id="segFieldAngle">
+        <label>Turn angle (&deg;) <span class="rangeval" id="segAngleLbl">90</span></label>
+        <input type="range" id="segAngle" min="10" max="180" step="5" value="90">
+      </div>
+      <div class="segfield" id="segFieldBank">
+        <label>Bank (&deg;) <span class="rangeval" id="segBankLbl">20</span></label>
+        <input type="range" id="segBank" min="0" max="60" step="1" value="20">
+      </div>
+      <div class="segfield" id="segFieldTurns">
+        <label>Turns <span class="rangeval" id="segTurnsLbl">1.00</span></label>
+        <input type="range" id="segTurns" min="0.5" max="3" step="0.25" value="1">
+      </div>
+      <div class="segfield" id="segFieldDir">
+        <label>Direction</label>
+        <select id="segDir"><option value="right">Right</option><option value="left">Left</option></select>
+      </div>
+
+      <button id="addSegBtn">Add Segment</button>
+      <p class="note">Every segment continues from exactly where the last one finished — pitch, heading and bank all carry over, so the ride is always physically continuous, however you build it.</p>
     </fieldset>
 
     <fieldset>

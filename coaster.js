@@ -73,11 +73,11 @@ const PRESETS = {
       { length: 4, thetaTo: 0 },
       { length: 20, thetaTo: -40 },
       { length: 6, thetaTo: 0 },
-      { length: 2 * Math.PI * 8, thetaTo: 360, tag: 'loop', verticalPassThrough: true },
+      { length: 2 * Math.PI * 8, thetaDelta: 360, tag: 'loop', verticalPassThrough: true },
       { length: 6, thetaTo: 0 },
       { length: arc(9, 110), psiTotal: 110, bankTo: 28 },
       { length: 4, bankTo: 0, thetaTo: 0 },
-      { length: helixLen(5, 1.15, 8), thetaTo: 8, psiTotal: 360 * 1.15, bankTo: 360, bankLinear: true, tag: 'helix' },
+      { length: helixLen(5, 1.15, 8), thetaTo: 8, psiTotal: 360 * 1.15, psiLinear: true, bankDelta: 360 * 1.15, bankLinear: true, tag: 'helix' },
       { length: 4, thetaTo: 0, bankTo: 0 },
       { length: 8, thetaTo: 0, tag: 'brake' },
       { length: 5, thetaTo: 0, tag: 'station' },
@@ -142,12 +142,15 @@ function buildTrack(segments, dsTarget = 0.35) {
 
   for (const seg of segments) {
     const thetaFrom = thetaDeg;
-    const thetaTo = seg.kind === 'hump' ? thetaFrom : (seg.thetaTo !== undefined ? seg.thetaTo : thetaFrom);
+    const thetaTo = seg.kind === 'hump' ? thetaFrom
+      : (seg.thetaDelta !== undefined ? thetaFrom + seg.thetaDelta
+      : (seg.thetaTo !== undefined ? seg.thetaTo : thetaFrom));
     const thetaPeak = seg.thetaPeak !== undefined ? seg.thetaPeak : thetaFrom;
     const psiFrom = psiDeg;
     const psiTotal = seg.psiTotal || 0;
     const bankFrom = bankDeg;
-    const bankTo = seg.bankTo !== undefined ? seg.bankTo : bankFrom;
+    const bankTo = seg.bankDelta !== undefined ? bankFrom + seg.bankDelta
+      : (seg.bankTo !== undefined ? seg.bankTo : bankFrom);
     const entryRight = samples[samples.length - 1].right.clone();
     const N = Math.max(4, Math.ceil(seg.length / dsTarget));
     const ds = seg.length / N;
@@ -157,7 +160,11 @@ function buildTrack(segments, dsTarget = 0.35) {
       const th = seg.kind === 'hump'
         ? thetaFrom + (thetaPeak - thetaFrom) * Math.sin(Math.PI * u)
         : lerp(thetaFrom, thetaTo, smoothstep(u));
-      const ps = psiFrom + psiTotal * u;
+      // yaw eases in/out like a real spiral (clothoid) transition by default —
+      // a plain linear ramp gives constant curvature but *jumps* to it instantly
+      // at the join, which is the "kinked" look real easement curves avoid.
+      // psiLinear opts back into a constant-rate sweep (e.g. a uniform corkscrew).
+      const ps = psiFrom + psiTotal * (seg.psiLinear ? u : smoothstep(u));
       const bk = seg.bankLinear ? lerp(bankFrom, bankTo, u) : lerp(bankFrom, bankTo, smoothstep(u));
       const thR = th * DEG, psR = ps * DEG;
       const fwd = new THREE.Vector3(Math.sin(psR) * Math.cos(thR), Math.sin(thR), Math.cos(psR) * Math.cos(thR));
@@ -218,7 +225,7 @@ function simulatePhysics(samplesM, p) {
 /* ---------------------------------------------------------------------
    LOW-LEVEL GEOMETRY BUILDERS
 --------------------------------------------------------------------- */
-function tubeGeometry(samples, i0, i1, offsetFn, radius, radialSeg = 8) {
+function tubeGeometry(samples, i0, i1, offsetFn, radius, radialSeg = 10) {
   const n = i1 - i0 + 1;
   const positions = [], idx = [];
   for (let k = 0; k < n; k++) {
@@ -256,7 +263,7 @@ function tubeGeometry(samples, i0, i1, offsetFn, radius, radialSeg = 8) {
   return geo;
 }
 
-function cylinderBetween(p0, p1, diameter, radialSeg = 8) {
+function cylinderBetween(p0, p1, diameter, radialSeg = 10) {
   const dir = new THREE.Vector3().subVectors(p1, p0);
   const len = Math.max(0.01, dir.length());
   dir.normalize();
@@ -413,7 +420,10 @@ els('scalePreset').addEventListener('change', () => {
   }
   scheduleRegen();
 });
-els('coasterType').addEventListener('change', scheduleRegen);
+els('coasterType').addEventListener('change', () => {
+  els('builderPanel').style.display = els('coasterType').value === 'custom' ? '' : 'none';
+  scheduleRegen();
+});
 ['bedX', 'bedY', 'bedZ', 'suppMin', 'suppMax'].forEach(id => els(id).addEventListener('change', scheduleRegen));
 els('regenBtn').addEventListener('click', () => generate());
 
@@ -448,6 +458,168 @@ function toast(msg) {
   toast._t = setTimeout(() => t.classList.remove('show'), 2600);
 }
 
+function coasterName(type) { return type === 'custom' ? 'Custom Coaster' : PRESETS[type].name; }
+
+/* ---------------------------------------------------------------------
+   TRACK BUILDER (custom mode) — lets a ride be built from scratch, one
+   segment at a time, instead of only picking a preset. Every segment
+   continues from wherever the chain currently ends (see buildTrack),
+   so anything strung together here is automatically continuous.
+--------------------------------------------------------------------- */
+let customSegments = [];
+const CUSTOM_STORE_KEY = 'coasterforge_custom_v1';
+
+function saveCustom() {
+  try { localStorage.setItem(CUSTOM_STORE_KEY, JSON.stringify(customSegments)); } catch (e) { /* private mode etc — non-fatal */ }
+}
+function loadCustom() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_STORE_KEY);
+    if (raw) customSegments = JSON.parse(raw);
+  } catch (e) { customSegments = []; }
+}
+
+function describeSegment(seg) {
+  if (seg._desc) return seg._desc;
+  if (seg.tag === 'loop') return `Vertical Loop — R${(seg.length / (2 * Math.PI)).toFixed(1)}m`;
+  if (seg.tag === 'helix') return `Corkscrew — ${seg.length.toFixed(0)}m run`;
+  if (seg.tag === 'lift') return `Lift Hill — ${seg.length.toFixed(0)}m`;
+  if (seg.tag === 'brake') return `Brake Run — ${seg.length.toFixed(0)}m`;
+  if (seg.tag === 'station') return `Station — ${seg.length.toFixed(0)}m`;
+  if (seg.kind === 'hump') return `Airtime Hill — ${seg.length.toFixed(0)}m`;
+  if (seg.psiTotal) return `Curve — ${Math.abs(seg.psiTotal).toFixed(0)}° ${seg.psiTotal > 0 ? 'right' : 'left'}`;
+  if (seg.thetaTo !== undefined) return `Climb/Drop — ${seg.length.toFixed(0)}m to ${seg.thetaTo}°`;
+  if (seg.bankTo !== undefined) return `Level Bank — ${seg.length.toFixed(0)}m`;
+  return `Straight — ${seg.length.toFixed(0)}m`;
+}
+
+const SEG_FIELDS = {
+  straight: ['length'],
+  climb: ['length', 'grade'],
+  hill: ['length', 'peak'],
+  levelbank: ['length'],
+  curve: ['radius', 'angle', 'dir', 'bank'],
+  lift: ['length', 'grade'],
+  brake: ['length'],
+  loop: ['radius'],
+  corkscrew: ['radius', 'turns', 'grade', 'dir'],
+  station: ['length'],
+};
+const FIELD_IDS = { length: 'segFieldLength', grade: 'segFieldGrade', peak: 'segFieldPeak', bank: 'segFieldBank', radius: 'segFieldRadius', angle: 'segFieldAngle', turns: 'segFieldTurns', dir: 'segFieldDir' };
+
+function updateAddFields() {
+  const active = new Set(SEG_FIELDS[els('addSegType').value]);
+  for (const f in FIELD_IDS) els(FIELD_IDS[f]).style.display = active.has(f) ? '' : 'none';
+}
+els('addSegType').addEventListener('change', updateAddFields);
+updateAddFields();
+
+function bindLocalRange(id, lblId, fmt = v => v) {
+  const el = els(id), lbl = els(lblId);
+  const u = () => { lbl.textContent = fmt(parseFloat(el.value)); };
+  el.addEventListener('input', u);
+  u();
+}
+bindLocalRange('segLength', 'segLengthLbl', v => v.toFixed(1));
+bindLocalRange('segGrade', 'segGradeLbl', v => v.toFixed(0));
+bindLocalRange('segPeak', 'segPeakLbl', v => v.toFixed(0));
+bindLocalRange('segBank', 'segBankLbl', v => v.toFixed(0));
+bindLocalRange('segRadius', 'segRadiusLbl', v => v.toFixed(1));
+bindLocalRange('segAngle', 'segAngleLbl', v => v.toFixed(0));
+bindLocalRange('segTurns', 'segTurnsLbl', v => v.toFixed(2));
+
+function readSegForm() {
+  return {
+    length: parseFloat(els('segLength').value),
+    grade: parseFloat(els('segGrade').value),
+    peak: parseFloat(els('segPeak').value),
+    bank: parseFloat(els('segBank').value),
+    radius: parseFloat(els('segRadius').value),
+    angle: parseFloat(els('segAngle').value),
+    turns: parseFloat(els('segTurns').value),
+    direction: els('segDir').value,
+  };
+}
+
+function makeSegment(type, f) {
+  const dir = f.direction === 'left' ? -1 : 1;
+  switch (type) {
+    case 'straight': return { length: f.length, _desc: `Straight — ${f.length}m` };
+    case 'climb': return { length: f.length, thetaTo: f.grade, _desc: `Climb/Drop — ${f.length}m to ${f.grade}°` };
+    case 'hill': return { length: f.length, kind: 'hump', thetaPeak: f.peak, _desc: `Airtime Hill — ${f.length}m, peak ${f.peak}°` };
+    case 'levelbank': return { length: f.length, bankTo: 0, _desc: `Level Bank — ${f.length}m` };
+    case 'curve': return {
+      length: arc(f.radius, f.angle), psiTotal: f.angle * dir, bankTo: f.bank * dir,
+      _desc: `Curve — R${f.radius}m, ${f.angle}° ${f.direction}, bank ${f.bank}°`,
+    };
+    case 'lift': return { length: f.length, thetaTo: f.grade, tag: 'lift', _desc: `Lift Hill — ${f.length}m to ${f.grade}°` };
+    case 'brake': return { length: f.length, thetaTo: 0, tag: 'brake', _desc: `Brake Run — ${f.length}m` };
+    case 'loop': return { length: 2 * Math.PI * f.radius, thetaDelta: 360, tag: 'loop', verticalPassThrough: true, _desc: `Vertical Loop — R${f.radius}m` };
+    case 'corkscrew': return {
+      length: helixLen(f.radius, f.turns, f.grade), thetaTo: f.grade,
+      psiTotal: 360 * f.turns * dir, psiLinear: true, bankDelta: 360 * f.turns * dir, bankLinear: true, tag: 'helix',
+      _desc: `Corkscrew — R${f.radius}m, ${f.turns} turn${f.turns === 1 ? '' : 's'} ${f.direction}`,
+    };
+    case 'station': return { length: f.length, thetaTo: 0, tag: 'station', _desc: `Station — ${f.length}m` };
+    default: return { length: f.length };
+  }
+}
+
+function renderSegList() {
+  const list = els('segList');
+  if (!customSegments.length) {
+    list.innerHTML = '<div class="segempty">Empty — add your first segment below.</div>';
+    return;
+  }
+  list.innerHTML = customSegments.map((seg, i) => `
+    <div class="segrow">
+      <span><span class="segn">${i + 1}.</span>${describeSegment(seg)}</span>
+      <span class="segactions">
+        <button data-act="up" data-i="${i}" ${i === 0 ? 'disabled' : ''}>&#8593;</button>
+        <button data-act="down" data-i="${i}" ${i === customSegments.length - 1 ? 'disabled' : ''}>&#8595;</button>
+        <button data-act="del" data-i="${i}">&times;</button>
+      </span>
+    </div>`).join('');
+  list.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const i = parseInt(btn.dataset.i, 10), act = btn.dataset.act;
+      if (act === 'del') customSegments.splice(i, 1);
+      else if (act === 'up' && i > 0) [customSegments[i - 1], customSegments[i]] = [customSegments[i], customSegments[i - 1]];
+      else if (act === 'down' && i < customSegments.length - 1) [customSegments[i + 1], customSegments[i]] = [customSegments[i], customSegments[i + 1]];
+      renderSegList();
+      saveCustom();
+      if (els('coasterType').value === 'custom') generate();
+    });
+  });
+}
+
+els('addSegBtn').addEventListener('click', () => {
+  customSegments.push(makeSegment(els('addSegType').value, readSegForm()));
+  renderSegList();
+  saveCustom();
+  if (els('coasterType').value === 'custom') generate();
+});
+
+els('startBlankBtn').addEventListener('click', () => {
+  customSegments = [];
+  renderSegList();
+  saveCustom();
+  if (els('coasterType').value === 'custom') generate();
+  toast('Cleared — build your coaster from scratch');
+});
+
+els('loadPresetBtn').addEventListener('click', () => {
+  const key = els('loadPresetSelect').value;
+  customSegments = JSON.parse(JSON.stringify(PRESETS[key].segs));
+  renderSegList();
+  saveCustom();
+  if (els('coasterType').value === 'custom') generate();
+  toast(`Loaded ${PRESETS[key].name} into the builder — edit freely`);
+});
+
+loadCustom();
+renderSegList();
+
 /* ---------------------------------------------------------------------
    MODEL STATE — rebuilt on every generate()
 --------------------------------------------------------------------- */
@@ -458,8 +630,14 @@ let currentModel = null; // { pieceMeshes:[], connectorMeshes:[], supportMeshes:
 
 function generate() {
   const p = getParams();
-  const preset = PRESETS[p.type];
-  const samplesM = buildTrack(preset.segs);
+  const segs = p.type === 'custom' ? customSegments : PRESETS[p.type].segs;
+  if (!segs.length) {
+    while (sceneGroup.children.length) sceneGroup.remove(sceneGroup.children[0]);
+    currentModel = null;
+    els('stats').innerHTML = 'Add at least one segment in the Track Builder above to generate a ride.';
+    return;
+  }
+  const samplesM = buildTrack(segs);
   const phys = simulatePhysics(samplesM, p);
 
   const samplesMM = samplesM.map(s => ({
@@ -530,11 +708,14 @@ function generate() {
     parts.push(tubeGeometry(samplesMM, i0, i1, offsetL, railR));
     parts.push(tubeGeometry(samplesMM, i0, i1, offsetR, railR));
     let anyLift = false, anyBrake = false;
+    const tieIdx = [];
     for (let k = i0; k <= i1; k++) {
       if (samplesMM[k].tag === 'lift') anyLift = true;
       if (samplesMM[k].tag === 'brake') anyBrake = true;
       if (k % tieEvery === 0) {
-        parts.push(boxAt(samplesMM[k], samplesMM[k].pos, p.gauge + railR * 2, railR * 1.1, railR * 1.6));
+        // slim crossbar, not a chunky block — real tubular-coaster ties read as a thin plate
+        parts.push(boxAt(samplesMM[k], samplesMM[k].pos, p.gauge + railR * 2, railR * 0.8, railR * 1.0));
+        tieIdx.push(k);
       }
       if (samplesMM[k].tag === 'lift' && k % Math.max(1, Math.floor(tieEvery / 2)) === 0) {
         parts.push(boxAt(samplesMM[k], samplesMM[k].pos, 1.6, 1.3, 0.9));
@@ -543,6 +724,15 @@ function generate() {
         const finPos = samplesMM[k].pos.clone().addScaledVector(samplesMM[k].up, 3);
         parts.push(boxAt(samplesMM[k], finPos, p.gauge * 0.55, 6, 0.9));
       }
+    }
+    // diagonal cross-bracing between alternating tie pairs — the X-lattice that
+    // gives real tubular steel coaster track (B&M/Intamin-style) its rigidity,
+    // rather than a bare ladder of straight rungs
+    const braceDia = Math.max(0.5, railR * 0.5);
+    for (let t = 0; t < tieIdx.length - 1; t += 2) {
+      const a = samplesMM[tieIdx[t]], b = samplesMM[tieIdx[t + 1]];
+      parts.push(cylinderBetween(offsetL(a), offsetR(b), braceDia));
+      parts.push(cylinderBetween(offsetR(a), offsetL(b), braceDia));
     }
     const merged = mergeGeometries(parts);
     const mat = anyBrake ? MAT.brake : (anyLift ? MAT.lift : MAT.rail);
@@ -660,7 +850,7 @@ function downloadBlob(blob, filename) {
 }
 
 els('exportFullBtn').addEventListener('click', () => {
-  if (!currentModel) return;
+  if (!currentModel) { toast('Add track segments first'); return; }
   const group = new THREE.Group();
   [...currentModel.pieceMeshes, ...currentModel.connectorMeshes, ...currentModel.supportMeshes].forEach(m => group.add(m.clone()));
   const buf = exportSTL(group);
@@ -669,13 +859,13 @@ els('exportFullBtn').addEventListener('click', () => {
 });
 
 els('exportKitBtn').addEventListener('click', async () => {
-  if (!currentModel) return;
+  if (!currentModel) { toast('Add track segments first'); return; }
   const btn = els('exportKitBtn');
   btn.disabled = true; btn.textContent = 'Packing…';
   try {
     const zip = new JSZip();
     const manifest = [];
-    manifest.push(`CoasterForge print kit — ${PRESETS[currentModel.params.type].name}`);
+    manifest.push(`CoasterForge print kit — ${coasterName(currentModel.params.type)}`);
     manifest.push(`Generated ${new Date().toISOString()}`);
     manifest.push(`Bed: ${currentModel.params.bed.x} x ${currentModel.params.bed.y} x ${currentModel.params.bed.z} mm`);
     manifest.push('');
