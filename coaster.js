@@ -436,6 +436,134 @@ scene.add(previewGroup);
 function clearPreview() { while (previewGroup.children.length) previewGroup.remove(previewGroup.children[0]); }
 
 /* ---------------------------------------------------------------------
+   ON-TRACK ARROWS — a small cluster of clickable 3D controls hovering just
+   above the ghost piece: bend (pitch, up/down), turn (yaw, left/right) and
+   twist (roll, CW/CCW). Clicking one nudges the matching sidebar slider and
+   fires its normal 'input'/'change' event, so the preview and the arrows
+   themselves just fall out of the existing updatePreview() refresh.
+--------------------------------------------------------------------- */
+const controlGroup = new THREE.Group();
+scene.add(controlGroup);
+function clearControls() { while (controlGroup.children.length) controlGroup.remove(controlGroup.children[0]); }
+
+const AXIS_COLOR = { bend: 0x4fb3ff, turn: 0xff7a45, twist: 0xb46fe0 };
+
+function makeCone(color, size) {
+  const geo = new THREE.ConeGeometry(size * 0.45, size, 10);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 }));
+  mesh.renderOrder = 999;
+  return mesh;
+}
+function orientCone(mesh, dir) {
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+}
+function makeTwistIcon(color, size) {
+  const group = new THREE.Group();
+  const arc = Math.PI * 1.4;
+  const torus = new THREE.Mesh(
+    new THREE.TorusGeometry(size * 0.55, size * 0.09, 8, 16, arc),
+    new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 })
+  );
+  torus.renderOrder = 999;
+  group.add(torus);
+  const tip = makeCone(color, size * 0.55);
+  tip.position.set(Math.cos(arc) * size * 0.55, Math.sin(arc) * size * 0.55, 0);
+  tip.quaternion.setFromEuler(new THREE.Euler(0, 0, arc - Math.PI / 2));
+  group.add(tip);
+  return group;
+}
+
+// which slider each axis nudges, for the segment type currently being added —
+// discovered from SEG_FIELDS so every type gets sensible arrows for free
+const FIELD_INPUT_ID = { grade: 'segGrade', peak: 'segPeak', bank: 'segBank', banktarget: 'segBankTarget', angle: 'segAngle', radius: 'segRadius', turns: 'segTurns' };
+function computeAxisAssignment(type) {
+  const fields = new Set(SEG_FIELDS[type] || []);
+  const bend = fields.has('grade') ? 'grade' : fields.has('peak') ? 'peak' : fields.has('radius') ? 'radius' : null;
+  const turn = fields.has('angle') ? 'angle' : fields.has('turns') ? 'turns' : null;
+  let twist = fields.has('bank') ? 'bank' : fields.has('banktarget') ? 'banktarget' : null;
+  if (!twist && !turn && fields.has('dir')) twist = 'dir';
+  return { bend, turn, twist };
+}
+function nudgeRange(fieldKey, sign) {
+  const el = els(FIELD_INPUT_ID[fieldKey]);
+  const step = parseFloat(el.step) || 1;
+  const v = clamp(parseFloat(el.value) + sign * step, parseFloat(el.min), parseFloat(el.max));
+  el.value = v;
+  el.dispatchEvent(new Event('input'));
+}
+function setDir(value) {
+  els('segDir').value = value;
+  els('segDir').dispatchEvent(new Event('change'));
+}
+function handleAxisClick(axis, dir) {
+  const assign = computeAxisAssignment(els('addSegType').value);
+  const field = assign[axis];
+  if (!field) return;
+  if (field === 'dir') { setDir(dir); return; }
+  if (axis === 'bend') nudgeRange(field, dir === 'up' ? 1 : -1);
+  else if (axis === 'turn') { setDir(dir); nudgeRange(field, 1); }
+  else if (axis === 'twist') nudgeRange(field, dir === 'right' ? 1 : -1);
+}
+
+function buildControls(anchorSample, armLen) {
+  const assign = computeAxisAssignment(els('addSegType').value);
+  const P = anchorSample.pos.clone().addScaledVector(anchorSample.up, armLen * 1.4);
+  const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, depthTest: false });
+  const add = (mesh, pos, axis, dir) => {
+    mesh.position.copy(pos);
+    mesh.userData = { axis, dir };
+    controlGroup.add(mesh);
+    // the visible icon (esp. the twist ring, which is hollow in the middle) is a
+    // fussy click target — a generous invisible sphere behind it is what actually
+    // catches the raycast, so clicking anywhere near the icon registers
+    const hit = new THREE.Mesh(new THREE.SphereGeometry(armLen * 0.65, 6, 6), hitMat);
+    hit.position.copy(pos);
+    hit.userData = { axis, dir };
+    controlGroup.add(hit);
+  };
+  if (assign.bend) {
+    const up = makeCone(AXIS_COLOR.bend, armLen * 0.6); orientCone(up, anchorSample.up);
+    add(up, P.clone().addScaledVector(anchorSample.up, armLen), 'bend', 'up');
+    const down = makeCone(AXIS_COLOR.bend, armLen * 0.6); orientCone(down, anchorSample.up.clone().negate());
+    add(down, P.clone().addScaledVector(anchorSample.up, -armLen * 0.6), 'bend', 'down');
+  }
+  if (assign.turn) {
+    const left = makeCone(AXIS_COLOR.turn, armLen * 0.6); orientCone(left, anchorSample.right.clone().negate());
+    add(left, P.clone().addScaledVector(anchorSample.right, -armLen), 'turn', 'left');
+    const right = makeCone(AXIS_COLOR.turn, armLen * 0.6); orientCone(right, anchorSample.right);
+    add(right, P.clone().addScaledVector(anchorSample.right, armLen), 'turn', 'right');
+  }
+  if (assign.twist) {
+    const basis = new THREE.Matrix4().makeBasis(anchorSample.right, anchorSample.up, anchorSample.fwd);
+    const q = new THREE.Quaternion().setFromRotationMatrix(basis);
+    const ccw = makeTwistIcon(AXIS_COLOR.twist, armLen * 0.9); ccw.quaternion.copy(q);
+    add(ccw, P.clone().addScaledVector(anchorSample.fwd, -armLen), 'twist', 'left');
+    const cw = makeTwistIcon(AXIS_COLOR.twist, armLen * 0.9); cw.quaternion.copy(q);
+    add(cw, P.clone().addScaledVector(anchorSample.fwd, armLen), 'twist', 'right');
+  }
+}
+
+const raycaster = new THREE.Raycaster();
+const mouseNDC = new THREE.Vector2();
+let pointerDownAt = null;
+renderer.domElement.addEventListener('pointerdown', e => { pointerDownAt = { x: e.clientX, y: e.clientY }; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!pointerDownAt) return;
+  const moved = Math.hypot(e.clientX - pointerDownAt.x, e.clientY - pointerDownAt.y);
+  pointerDownAt = null;
+  if (moved > 5 || !controlGroup.children.length) return; // a camera drag, not a click
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouseNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  mouseNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouseNDC, camera);
+  const hits = raycaster.intersectObjects(controlGroup.children, true);
+  if (!hits.length) return;
+  let obj = hits[0].object;
+  while (obj && !obj.userData.axis) obj = obj.parent;
+  if (obj) handleAxisClick(obj.userData.axis, obj.userData.dir);
+});
+
+/* ---------------------------------------------------------------------
    UI STATE
 --------------------------------------------------------------------- */
 const els = id => document.getElementById(id);
@@ -639,6 +767,7 @@ function makeSegment(type, f) {
 // it (or clears it, outside custom mode) via the call at the end of generate().
 function updatePreview() {
   clearPreview();
+  clearControls();
   if (els('coasterType').value !== 'custom') return;
   const seg = makeSegment(els('addSegType').value, readSegForm());
   if (!seg.length || seg.length <= 0) return;
@@ -650,9 +779,13 @@ function updatePreview() {
   const previewMM = previewSamplesM.slice(startIdx).map(s => ({
     pos: s.pos.clone().multiplyScalar(mmPerM), right: s.right, up: s.up, fwd: s.fwd,
   }));
-  const previewRing = circleRing(Math.max(1.2, parseFloat(els('railD').value) * 0.9), 8);
+  const railD = parseFloat(els('railD').value);
+  const previewRing = circleRing(Math.max(1.2, railD * 0.9), 8);
   const geo = tubeGeometry(previewMM, 0, previewMM.length - 1, s => s.pos, previewRing);
   previewGroup.add(new THREE.Mesh(geo, MAT.preview));
+
+  const midSample = previewMM[Math.floor(previewMM.length / 2)];
+  buildControls(midSample, Math.max(8, railD * 3));
 }
 
 function renderSegList() {
