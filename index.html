@@ -168,6 +168,7 @@
       <legend>Print scale</legend>
       <label>Model scale</label>
       <select id="scalePreset">
+        <option value="20">1:20 — Toy scale, chunky hand-sized track</option>
         <option value="87">1:87 — HO</option>
         <option value="160" selected>1:160 — N</option>
         <option value="220">1:220 — Z</option>
@@ -175,7 +176,7 @@
       </select>
       <div id="customScaleWrap" style="display:none">
         <label>mm per real-world metre <span class="rangeval" id="mmPerMLbl">6.25</span></label>
-        <input type="range" id="mmPerM" min="1" max="20" step="0.05" value="6.25">
+        <input type="range" id="mmPerM" min="1" max="80" step="0.25" value="6.25">
       </div>
       <label>Printer bed X × Y × Z (mm)</label>
       <div class="row">
@@ -194,11 +195,11 @@
         <option value="inverted">Inverted — B&amp;M box-beam, train hangs below</option>
       </select>
       <label>Rail diameter (mm) <span class="rangeval" id="railDLbl">3.0</span></label>
-      <input type="range" id="railD" min="1.5" max="6" step="0.1" value="3.0">
+      <input type="range" id="railD" min="1.5" max="14" step="0.1" value="3.0">
       <label>Rail gauge (mm) <span class="rangeval" id="gaugeLbl">11</span></label>
-      <input type="range" id="gauge" min="6" max="24" step="0.5" value="11">
+      <input type="range" id="gauge" min="6" max="60" step="0.5" value="11">
       <label>Tie spacing (mm) <span class="rangeval" id="tieSpLbl">9</span></label>
-      <input type="range" id="tieSp" min="4" max="20" step="0.5" value="9">
+      <input type="range" id="tieSp" min="4" max="40" step="0.5" value="9">
     </fieldset>
 
     <fieldset>
